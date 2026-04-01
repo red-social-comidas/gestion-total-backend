@@ -5,7 +5,7 @@ Usa INSERT ... ON CONFLICT DO UPDATE (upsert nativo de Postgres).
 """
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models.producto import ProductoWeb
 from app.models.categoria import CategoriaWeb
@@ -167,6 +167,128 @@ async def upsert_categorias(
     await db.commit()
     return {"procesados": len(payload.batch), "creados": creados, "errores": errores}
 
+
+
+
+async def patch_stock_productos(
+    tenant_id: uuid.UUID,
+    payload,   # StockBatchPayload
+    db: AsyncSession,
+) -> dict:
+    """
+    Actualiza SOLO stock_actual de los productos indicados.
+    No toca precio, nombre, habilitado_web ni descripcion_web.
+    Usa UPDATE directo por (tenant_id, id_local).
+    """
+    from app.models.producto import ProductoWeb
+    from datetime import datetime, timezone
+
+    actualizados = no_encontrados = errores = 0
+    ahora = datetime.now(timezone.utc)
+
+    for item in payload.batch:
+        try:
+            stmt = (
+                update(ProductoWeb)
+                .where(
+                    ProductoWeb.tenant_id == tenant_id,
+                    ProductoWeb.id_local  == item.id_local,
+                )
+                .values(
+                    stock_actual = item.stock_actual,
+                    ultima_sync  = ahora,
+                    updated_at   = ahora,
+                )
+                .returning(ProductoWeb.id)
+            )
+            result = await db.execute(stmt)
+            row = result.fetchone()
+            if row:
+                actualizados += 1
+            else:
+                no_encontrados += 1
+        except Exception:
+            errores += 1
+
+    await db.commit()
+
+    # tipo="productos" porque el constraint chk_sync_tipo solo acepta valores conocidos.
+    # El subtipo "stock" se distingue en mensaje_error.
+    await _registrar_sync_log(
+        tenant_id=tenant_id,
+        tipo="productos",
+        direccion="subida",
+        estado="ok" if errores == 0 else "parcial",
+        registros=actualizados,
+        mensaje_error=(
+            f"[sync-stock] {errores} errores, {no_encontrados} no encontrados"
+            if (errores or no_encontrados)
+            else "[sync-stock]"
+        ),
+        db=db,
+    )
+
+    return {"actualizados": actualizados, "no_encontrados": no_encontrados, "errores": errores}
+
+
+async def patch_precios_productos(
+    tenant_id: uuid.UUID,
+    payload,   # PrecioBatchPayload
+    db: AsyncSession,
+) -> dict:
+    """
+    Actualiza SOLO precio de los productos indicados.
+    No toca stock, nombre, habilitado_web ni descripcion_web.
+    Loguea de qué lista proviene el precio para trazabilidad.
+    """
+    from app.models.producto import ProductoWeb
+    from datetime import datetime, timezone
+
+    actualizados = no_encontrados = errores = 0
+    ahora = datetime.now(timezone.utc)
+
+    for item in payload.batch:
+        try:
+            stmt = (
+                update(ProductoWeb)
+                .where(
+                    ProductoWeb.tenant_id == tenant_id,
+                    ProductoWeb.id_local  == item.id_local,
+                )
+                .values(
+                    precio      = item.precio,
+                    ultima_sync = ahora,
+                    updated_at  = ahora,
+                )
+                .returning(ProductoWeb.id)
+            )
+            result = await db.execute(stmt)
+            row = result.fetchone()
+            if row:
+                actualizados += 1
+            else:
+                no_encontrados += 1
+        except Exception:
+            errores += 1
+
+    await db.commit()
+
+    # tipo="productos" — el constraint chk_sync_tipo no admite "precios"
+    await _registrar_sync_log(
+        tenant_id=tenant_id,
+        tipo="productos",
+        direccion="subida",
+        estado="ok" if errores == 0 else "parcial",
+        registros=actualizados,
+        mensaje_error=(
+            f"[sync-precios] {errores} errores, {no_encontrados} no encontrados"
+            if (errores or no_encontrados)
+            else "[sync-precios]"
+        ),
+        db=db,
+    )
+
+    return {"actualizados": actualizados, "no_encontrados": no_encontrados, "errores": errores}
 
 async def _registrar_sync_log(
     tenant_id: uuid.UUID,

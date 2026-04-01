@@ -15,14 +15,25 @@ from app.dependencies.sync_auth import verify_sync_api_key
 from app.models.tenant import Tenant
 from app.models.pedido import PedidoWeb, PedidoItem
 from app.models.sync_log import SyncLog
-from app.schemas.producto import ProductosBatchPayload, SyncBatchResponse
+from app.schemas.producto import (
+    ProductosBatchPayload,
+    SyncBatchResponse,
+    StockBatchPayload,
+    PrecioBatchPayload,
+    PatchBatchResult,
+)
 from app.schemas.categoria import CategoriasBatchPayload
 from app.schemas.pedido import (
     PedidoResponse,
     PedidoSincronizadoUpdate,
     PedidoEstadoSyncUpdate,
 )
-from app.services.sync_service import upsert_productos, upsert_categorias
+from app.services.sync_service import (
+    upsert_productos,
+    upsert_categorias,
+    patch_stock_productos,
+    patch_precios_productos,
+)
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
 
@@ -101,6 +112,50 @@ async def sync_categorias(
 ):
     """Recibe categorías desde SQL Server y las sincroniza en Postgres."""
     return await upsert_categorias(tenant.id, payload, db)
+
+
+
+# ── Sync parcial: solo stock ──────────────────────────────────────────────────
+
+@router.patch("/productos/stock", response_model=PatchBatchResult)
+async def sync_stock_productos(
+    payload: StockBatchPayload,
+    tenant: Tenant = Depends(verify_sync_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Actualiza SOLO el stock_actual de los productos indicados.
+
+    El sync C# llama a este endpoint desde el botón "Sync Stock".
+    Solo actualiza productos que YA EXISTEN en cloud (por id_local).
+    Productos no encontrados se ignoran (no se crea nada nuevo).
+
+    No toca: precio, nombre, descripcion_web, imagen_url, habilitado_web.
+    """
+    result = await patch_stock_productos(tenant.id, payload, db)
+    return PatchBatchResult(**result)
+
+
+# ── Sync parcial: solo precios ────────────────────────────────────────────────
+
+@router.patch("/productos/precios", response_model=PatchBatchResult)
+async def sync_precios_productos(
+    payload: PrecioBatchPayload,
+    tenant: Tenant = Depends(verify_sync_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Actualiza SOLO el precio de los productos indicados.
+
+    El sync C# llama a este endpoint desde el botón "Sync Precios".
+    Cada item indica de qué lista de precios proviene (id_lista + nombre_lista)
+    para trazabilidad — la API solo guarda el precio resultante.
+
+    Solo actualiza productos que YA EXISTEN en cloud (por id_local).
+    No toca: stock, nombre, descripcion_web, imagen_url, habilitado_web.
+    """
+    result = await patch_precios_productos(tenant.id, payload, db)
+    return PatchBatchResult(**result)
 
 
 # ── Bajada de pedidos ─────────────────────────────────────────────────────────

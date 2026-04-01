@@ -96,3 +96,48 @@ class HabilitarWebRequest(BaseModel):
 
 class DescripcionWebRequest(BaseModel):
     descripcion_web: Optional[str] = None
+
+
+# ── Sync parcial: stock y precios (C# → API) ─────────────────────────────────
+
+class StockSyncItem(BaseModel):
+    """Un producto con solo su stock actualizado."""
+    id_local:     int
+    stock_actual: Decimal
+
+
+class StockBatchPayload(BaseModel):
+    batch: list[StockSyncItem]
+
+    @field_validator("batch")
+    @classmethod
+    def batch_no_vacio(cls, v: list) -> list:
+        if len(v) > 1000:
+            raise ValueError("El batch no puede superar 1000 items.")
+        return v
+
+
+class PrecioSyncItem(BaseModel):
+    """Un producto con solo su precio actualizado."""
+    id_local:    int
+    precio:      Decimal
+    id_lista:    int = 0       # 0 = precio base
+    nombre_lista: str = "BASE"
+
+
+class PrecioBatchPayload(BaseModel):
+    batch: list[PrecioSyncItem]
+
+    @field_validator("batch")
+    @classmethod
+    def batch_no_vacio(cls, v: list) -> list:
+        if len(v) > 1000:
+            raise ValueError("El batch no puede superar 1000 items.")
+        return v
+
+
+class PatchBatchResult(BaseModel):
+    actualizados:   int
+    no_encontrados: int
+    errores:        int
+
