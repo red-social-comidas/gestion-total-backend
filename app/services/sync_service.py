@@ -212,19 +212,13 @@ async def patch_stock_productos(
 
     await db.commit()
 
-    # tipo="productos" porque el constraint chk_sync_tipo solo acepta valores conocidos.
-    # El subtipo "stock" se distingue en mensaje_error.
     await _registrar_sync_log(
         tenant_id=tenant_id,
-        tipo="productos",
+        tipo="stock",
         direccion="subida",
         estado="ok" if errores == 0 else "parcial",
         registros=actualizados,
-        mensaje_error=(
-            f"[sync-stock] {errores} errores, {no_encontrados} no encontrados"
-            if (errores or no_encontrados)
-            else "[sync-stock]"
-        ),
+        mensaje_error=f"{errores} errores, {no_encontrados} no encontrados" if (errores or no_encontrados) else None,
         db=db,
     )
 
@@ -273,18 +267,13 @@ async def patch_precios_productos(
 
     await db.commit()
 
-    # tipo="productos" — el constraint chk_sync_tipo no admite "precios"
     await _registrar_sync_log(
         tenant_id=tenant_id,
-        tipo="productos",
+        tipo="precios",
         direccion="subida",
         estado="ok" if errores == 0 else "parcial",
         registros=actualizados,
-        mensaje_error=(
-            f"[sync-precios] {errores} errores, {no_encontrados} no encontrados"
-            if (errores or no_encontrados)
-            else "[sync-precios]"
-        ),
+        mensaje_error=f"{errores} errores, {no_encontrados} no encontrados" if (errores or no_encontrados) else None,
         db=db,
     )
 

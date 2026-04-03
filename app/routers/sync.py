@@ -158,6 +158,40 @@ async def sync_precios_productos(
     return PatchBatchResult(**result)
 
 
+
+
+# ── Consulta de estado actual de productos en cloud ───────────────────────────
+
+@router.get("/productos/estado")
+async def get_estado_productos(
+    tenant: Tenant = Depends(verify_sync_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Devuelve el estado actual de TODOS los productos del tenant en cloud.
+    El sync C# usa esto para comparar con SQL Server y detectar diferencias
+    sin depender de cursores de tiempo.
+
+    Respuesta: lista de { id_local, precio, stock_actual }
+    Optimizado para batches grandes: sin paginación, un solo query.
+    """
+    from sqlalchemy import text
+    result = await db.execute(
+        text("""
+            SELECT id_local, precio, stock_actual
+            FROM productos_web
+            WHERE tenant_id = :tenant_id
+              AND activo_local = true
+            ORDER BY id_local ASC
+        """),
+        {"tenant_id": str(tenant.id)}
+    )
+    rows = result.fetchall()
+    return [
+        {"id_local": r[0], "precio": float(r[1]), "stock_actual": float(r[2])}
+        for r in rows
+    ]
+
 # ── Bajada de pedidos ─────────────────────────────────────────────────────────
 
 @router.get("/pedidos/pendientes", response_model=list[PedidoResponse])
